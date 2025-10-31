@@ -1,0 +1,22 @@
+Ignore the virtual environment and cached files
+
+.venv
+.git
+.vercel
+node_modules
+pycache
+*.pyc
+
+Explicitly ignore all deployment artifacts and temp data
+
+*.nc
+*.joblib
+*.zip
+tmp/
+
+Keep only the necessary files: main.py, requirements.txt, and vercel.json
+
+!main.py
+!requirements.txt
+!vercel.json
+!.vercelignore
