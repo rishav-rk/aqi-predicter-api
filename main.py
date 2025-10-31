@@ -7,7 +7,10 @@ import os
 import numpy as np
 import joblib 
 from datetime import datetime
+from fastapi.middleware.cors import CORSMiddleware
+
 import sys
+
 
 # --- PM2.5 Model Setup ---
 # Load model package and features once when the API starts
@@ -146,7 +149,7 @@ def get_aod_data(lat: float, lon: float, nc_file_path: str) -> Tuple[float, str]
         # Check for non-physical negative values and cap at 0.0
         if aod_value < 0:
             aod_value = 0.0
-            
+
         status_msg = f"AOD Status: OK from {os.path.basename(nc_file_path)}"
         return round(aod_value, 3), status_msg
 
@@ -254,6 +257,14 @@ def get_era5_data(lat: float, lon: float, nc_file_path: str) -> Tuple[Dict[str, 
 app = FastAPI()
 
 # --- Existing Endpoints (omitted for brevity) ---
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # allows all origins
+    allow_credentials=True,
+    allow_methods=["*"],  # allows all HTTP methods: GET, POST, PUT, DELETE, etc.
+    allow_headers=["*"],  # allows all headers
+)
 
 @app.get("/")
 def read_home():
