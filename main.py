@@ -344,6 +344,11 @@ def query_aod_era5_data(coords: Coordinates):
         "pm25_prediction": pm25_pred, # Include the new prediction
     }
     # Merge the processed ERA5 data dictionary into the final response
+
     response_data.update(era5_data)
     
     return response_data
+
+@app.post('/sendSuggestions')
+def read_suggestions(output: dict):
+    print(output)
