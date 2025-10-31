@@ -8,8 +8,83 @@ import numpy as np
 import joblib 
 from datetime import datetime
 from fastapi.middleware.cors import CORSMiddleware
-
 import sys
+from scipy.spatial import cKDTree 
+
+# --- Global Data Storage for AOD (Loaded from CSV) ---
+AOD_DF = None
+AOD_KD_TREE = None
+AOD_DATA_LOADED = False
+
+# --- Constants ---
+AOD_CSV_PATH = "AODdataset\AOD_India_Valid_Nearest_Imputed.csv" 
+AOD_VARIABLE_NAME = "AOD" # Column name in your CSV
+IMPUTED_AOD = 0.1 # Fallback value for critical errors
+
+# --- Helper Function to Load AOD Data (Runs at startup) ---
+def load_aod_data():
+    """Loads the AOD CSV into a DataFrame and builds the KDTree once."""
+    global AOD_DF, AOD_KD_TREE, AOD_DATA_LOADED
+    
+    if not os.path.exists(AOD_CSV_PATH):
+        print(f"❌ AOD Data Error: Imputed CSV file not found at {AOD_CSV_PATH}")
+        AOD_DATA_LOADED = False
+        return
+
+    try:
+        # Load the CSV, assuming the columns are latitude, longitude, and AOD
+        AOD_DF = pd.read_csv(AOD_CSV_PATH)
+        
+        required_cols = ['latitude', 'longitude', AOD_VARIABLE_NAME]
+        if not all(col in AOD_DF.columns for col in required_cols):
+             print(f"❌ AOD Data Error: CSV missing required columns (expected: {required_cols})")
+             AOD_DATA_LOADED = False
+             return
+
+        # Prepare the coordinates for the KD-Tree (Latitude, Longitude)
+        coords = AOD_DF[['latitude', 'longitude']].values
+        AOD_KD_TREE = cKDTree(coords)
+        
+        AOD_DATA_LOADED = True
+        print(f"✅ AOD Imputed Data loaded successfully from {AOD_CSV_PATH}")
+        
+    except Exception as e:
+        print(f"❌ AOD Data Error during loading or KDTree building: {e}")
+        AOD_DATA_LOADED = False
+
+# Execute the loading function immediately upon import
+load_aod_data()
+
+# -----------------------------------------------------------------------------
+# --- The 'get_aod_data' method that retrieves values from the CSV ---
+def get_aod_data(lat: float, lon: float, aod_file_path: str) -> Tuple[float, str]:
+    """
+    Extracts the nearest AOD value from the pre-loaded Imputed CSV (DataFrame) 
+    using KD-Tree for efficient geographical search.
+    
+    The 'aod_file_path' argument is kept for consistency with the overall API structure 
+    but is not used for file loading here.
+    """
+    if not AOD_DATA_LOADED:
+        status_msg = f"AOD Error: Imputed CSV data not loaded. Using default AOD={IMPUTED_AOD}."
+        return IMPUTED_AOD, status_msg
+
+    try:
+        # Use the KD-Tree to find the index of the nearest neighbor
+        # d is distance, i is the index of the nearest point in the DataFrame
+        d, i = AOD_KD_TREE.query([lat, lon], k=1) 
+        
+        # Retrieve the AOD value using the index
+        nearest_aod_value = AOD_DF.loc[i, AOD_VARIABLE_NAME]
+        
+        status_msg = f"AOD Status: OK from pre-loaded Imputed Data ({os.path.basename(AOD_CSV_PATH)})"
+        
+        return round(nearest_aod_value, 3), status_msg
+
+    except Exception as e:
+        status_msg = f"AOD Critical Error during KD-Tree query: {e}. Using default AOD."
+        print(status_msg)
+        return IMPUTED_AOD, status_msg
 
 
 # --- PM2.5 Model Setup ---
@@ -28,8 +103,8 @@ except Exception as e:
 
 # --- Constants ---
 # NOTE: Replace these paths with the actual paths to your NetCDF files
-ERA5_NETCDF_PATH = r"era5septdataset\93916cbc2757f8631fb61281c6978d1f.nc"
-AOD_NETCDF_PATH = r"AODdataset\AOD_India_Valid_Nearest_Imputed.nc" 
+ERA5_NETCDF_PATH = "era5septdataset\93916cbc2757f8631fb61281c6978d1f.nc"
+AOD_NETCDF_PATH = "AODdataset\AOD_India_Subset.nc" 
 
 # ERA5 Variable Names in the NetCDF File
 KELVIN_TO_CELSIUS = 273.15
@@ -116,58 +191,6 @@ def predict_pm25(raw_data: Dict[str, Any]) -> float:
 
 
 # --- Helper Function for AOD Processing (MODIFIED) ---
-
-# --- Helper Function for AOD Processing (CONCEPTUAL SPATIAL IMPUTATION) ---
-
-def get_aod_data(lat: float, lon: float, nc_file_path: str) -> Tuple[float, str]:
-    """
-    Extracts the nearest AOD value from the NetCDF file.
-    If the nearest value is NaN, it is imputed using the median of neighbors.
-    """
-    SENTINEL_AOD = -999.0 
-    IMPUTATION_RADIUS_DEG = 0.1 # Example: ~10-12 km resolution for your data
-
-    # [File check/Error handling code remains the same]
-    # ... (Your existing file check and open_dataset code)
-
-    try:
-        ds = xr.open_dataset(nc_file_path)
-        aod_da = ds[AOD_VARIABLE_NAME]
-
-        # 1. Get the nearest point
-        aod_xarray_point = aod_da.sel(latitude=lat, longitude=lon, method="nearest")
-        aod_value = aod_xarray_point.values.item() 
-
-        # 2. Check for missing data (NaN)
-        if np.isnan(aod_value):
-            # Imputation Step: Select a small area around the missing point
-            subset_window = aod_da.sel(
-                latitude=slice(lat + IMPUTATION_RADIUS_DEG, lat - IMPUTATION_RADIUS_DEG),
-                longitude=slice(lon - IMPUTATION_RADIUS_DEG, lon + IMPUTATION_RADIUS_DEG)
-            )
-            
-            # Calculate the MEDIAN of all VALID (non-NaN) values in the window
-            imputed_aod = subset_window.median().item()
-            
-            # Fallback to the hardcoded value if the local window is ALSO all NaN
-            if np.isnan(imputed_aod) or imputed_aod < 0.0:
-                final_aod = IMPUTED_AOD # 0.1
-                status_msg = f"AOD Status: Missing. Imputed with default AOD={final_aod} (Local window also missing)."
-            else:
-                final_aod = imputed_aod
-                status_msg = f"AOD Status: Missing. Imputed with Spatial Median from neighbors."
-
-            return round(final_aod, 3), status_msg
-
-        status_msg = f"AOD Status: OK from {os.path.basename(nc_file_path)}"
-        return round(aod_value, 3), status_msg
-
-    except Exception as e:
-        # ... (Your existing error handling)
-        status_msg = f"AOD Critical Error: {e}"
-        print(status_msg)
-        return SENTINEL_AOD, status_msg
-
 
 # --- Helper Function for ERA5 Processing ---
 
