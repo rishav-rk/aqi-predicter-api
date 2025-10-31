@@ -29,7 +29,7 @@ except Exception as e:
 # --- Constants ---
 # NOTE: Replace these paths with the actual paths to your NetCDF files
 ERA5_NETCDF_PATH = r"era5septdataset\93916cbc2757f8631fb61281c6978d1f.nc"
-AOD_NETCDF_PATH = r"AODdataset\AOD_India_Subset.nc" 
+AOD_NETCDF_PATH = r"AODdataset\AOD_India_Valid_Nearest_Imputed.nc" 
 
 # ERA5 Variable Names in the NetCDF File
 KELVIN_TO_CELSIUS = 273.15
@@ -117,43 +117,53 @@ def predict_pm25(raw_data: Dict[str, Any]) -> float:
 
 # --- Helper Function for AOD Processing (MODIFIED) ---
 
+# --- Helper Function for AOD Processing (CONCEPTUAL SPATIAL IMPUTATION) ---
+
 def get_aod_data(lat: float, lon: float, nc_file_path: str) -> Tuple[float, str]:
     """
     Extracts the nearest AOD value from the NetCDF file.
-    If the nearest value is NaN (missing data), it is imputed with IMPUTED_AOD (0.1).
-    Returns the AOD value and a status message.
+    If the nearest value is NaN, it is imputed using the median of neighbors.
     """
-    SENTINEL_AOD = -999.0 # Used if file or variable is missing
-    
-    if not os.path.exists(nc_file_path):
-        status_msg = f"AOD Error: File {os.path.basename(nc_file_path)} not found. Using sentinel value."
-        return SENTINEL_AOD, status_msg
-        
+    SENTINEL_AOD = -999.0 
+    IMPUTATION_RADIUS_DEG = 0.1 # Example: ~10-12 km resolution for your data
+
+    # [File check/Error handling code remains the same]
+    # ... (Your existing file check and open_dataset code)
+
     try:
         ds = xr.open_dataset(nc_file_path)
-        
-        if AOD_VARIABLE_NAME not in ds.data_vars:
-            status_msg = f"AOD Error: Variable '{AOD_VARIABLE_NAME}' not found in file."
-            return SENTINEL_AOD, status_msg
+        aod_da = ds[AOD_VARIABLE_NAME]
 
-        # Use the 'nearest' method to find the closest data point, which addresses the request
-        aod_xarray_point = ds[AOD_VARIABLE_NAME].sel(latitude=lat, longitude=lon, method="nearest")
+        # 1. Get the nearest point
+        aod_xarray_point = aod_da.sel(latitude=lat, longitude=lon, method="nearest")
         aod_value = aod_xarray_point.values.item() 
 
-        # Check for missing data (NaN, often due to cloud cover) and impute a reasonable value
+        # 2. Check for missing data (NaN)
         if np.isnan(aod_value):
-            aod_value = IMPUTED_AOD
-            status_msg = f"AOD Status: Missing data (e.g., Cloud Cover). Imputed with default AOD={IMPUTED_AOD}."
-            return round(aod_value, 3), status_msg
+            # Imputation Step: Select a small area around the missing point
+            subset_window = aod_da.sel(
+                latitude=slice(lat + IMPUTATION_RADIUS_DEG, lat - IMPUTATION_RADIUS_DEG),
+                longitude=slice(lon - IMPUTATION_RADIUS_DEG, lon + IMPUTATION_RADIUS_DEG)
+            )
             
-        # Check for non-physical negative values and cap at 0.0
-        if aod_value < 0:
-            aod_value = 0.0
+            # Calculate the MEDIAN of all VALID (non-NaN) values in the window
+            imputed_aod = subset_window.median().item()
+            
+            # Fallback to the hardcoded value if the local window is ALSO all NaN
+            if np.isnan(imputed_aod) or imputed_aod < 0.0:
+                final_aod = IMPUTED_AOD # 0.1
+                status_msg = f"AOD Status: Missing. Imputed with default AOD={final_aod} (Local window also missing)."
+            else:
+                final_aod = imputed_aod
+                status_msg = f"AOD Status: Missing. Imputed with Spatial Median from neighbors."
+
+            return round(final_aod, 3), status_msg
 
         status_msg = f"AOD Status: OK from {os.path.basename(nc_file_path)}"
         return round(aod_value, 3), status_msg
 
     except Exception as e:
+        # ... (Your existing error handling)
         status_msg = f"AOD Critical Error: {e}"
         print(status_msg)
         return SENTINEL_AOD, status_msg
