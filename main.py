@@ -17,7 +17,7 @@ AOD_KD_TREE = None
 AOD_DATA_LOADED = False
 
 # --- Constants ---
-AOD_CSV_PATH = r"AODdataset\AOD_India_Valid_Nearest_Imputed.csv" 
+AOD_CSV_PATH = "AODdataset/AOD_India_Valid_Nearest_Imputed.csv" 
 AOD_VARIABLE_NAME = "AOD" # Column name in your CSV
 IMPUTED_AOD = 0.1 # Fallback value for critical errors
 
