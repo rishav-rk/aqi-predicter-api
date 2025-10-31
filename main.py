@@ -17,7 +17,7 @@ AOD_KD_TREE = None
 AOD_DATA_LOADED = False
 
 # --- Constants ---
-AOD_CSV_PATH = "AODdataset/AOD_India_Valid_Nearest_Imputed.csv" 
+AOD_CSV_PATH = os.path.join("AODdataset","AOD_India_Valid_Nearest_Imputed.csv") 
 AOD_VARIABLE_NAME = "AOD" # Column name in your CSV
 IMPUTED_AOD = 0.1 # Fallback value for critical errors
 
@@ -103,8 +103,8 @@ except Exception as e:
 
 # --- Constants ---
 # NOTE: Replace these paths with the actual paths to your NetCDF files
-ERA5_NETCDF_PATH = r"era5septdataset\93916cbc2757f8631fb61281c6978d1f.nc"
-AOD_NETCDF_PATH = r"AODdataset\AOD_India_Subset.nc" 
+ERA5_NETCDF_PATH = os.path.join("era5septdataset","93916cbc2757f8631fb61281c6978d1f.nc")
+AOD_NETCDF_PATH = os.path.join("AODdataset","AOD_India_Subset.nc") 
 
 # ERA5 Variable Names in the NetCDF File
 KELVIN_TO_CELSIUS = 273.15
